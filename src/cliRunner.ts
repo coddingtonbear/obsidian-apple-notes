@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Platform } from "obsidian";
+import { buildEnv, directoryOf, normalizeBinaryPath, planSpawn, type ProcessEnv } from "./cliEnv";
 import type IcloudPlugin from "./main";
 
 /**
@@ -8,8 +9,6 @@ import type IcloudPlugin from "./main";
  * rules. Pin the slice of the node API we use to explicit local types so the
  * boundary stays typed whether or not the ambient node types are present.
  */
-type ProcessEnv = Record<string, string | undefined>;
-
 interface SpawnedStream {
 	on(event: "data", listener: (data: { toString(): string }) => void): void;
 }
@@ -24,7 +23,7 @@ interface SpawnedChild {
 const spawn = nodeSpawn as unknown as (
 	command: string,
 	args: string[],
-	options: { cwd?: string; env: ProcessEnv },
+	options: { cwd?: string; env: ProcessEnv; windowsVerbatimArguments?: boolean },
 ) => SpawnedChild;
 
 const processEnv = (window as unknown as { process: { env: ProcessEnv } }).process.env;
@@ -43,21 +42,7 @@ export interface CliRunOptions {
 
 /** The user's explicit override, falling back to bare `icloud-md` on PATH. */
 function resolveBinary(plugin: IcloudPlugin): string {
-	return plugin.localStorage.getBinaryPath() || "icloud-md";
-}
-
-/**
- * GUI-launched Obsidian doesn't inherit the shell PATH, so npm's global bin
- * dir (nvm/Homebrew/asdf) is often invisible to spawn(). User-editable extra
- * PATH entries are prepended, mirroring obsidian-git's simpleGit.ts pattern.
- */
-function buildEnv(plugin: IcloudPlugin): ProcessEnv {
-	const env: ProcessEnv = { ...processEnv };
-	const additions = plugin.localStorage.getPathAdditions();
-	if (additions.length > 0) {
-		env["PATH"] = additions.join(":") + ":" + (env["PATH"] ?? "");
-	}
-	return env;
+	return normalizeBinaryPath(plugin.localStorage.getBinaryPath() ?? "") || "icloud-md";
 }
 
 /** Spawns the icloud-md CLI and resolves once it exits, streaming output as it arrives. */
@@ -72,9 +57,13 @@ export function runIcloudMd(plugin: IcloudPlugin, args: string[], options: CliRu
 	}
 
 	return new Promise((resolve) => {
-		const child = spawn(resolveBinary(plugin), args, {
+		const binary = resolveBinary(plugin);
+		const env = buildEnv(processEnv, plugin.localStorage.getPathAdditions(), directoryOf(binary), Platform.isWin);
+		const plan = planSpawn(binary, args, Platform.isWin, env);
+		const child = spawn(plan.command, plan.args, {
 			cwd: options.cwd,
-			env: buildEnv(plugin),
+			env,
+			windowsVerbatimArguments: plan.windowsVerbatimArguments,
 		});
 
 		let stdout = "";

@@ -1,4 +1,5 @@
-import { Notice, PluginSettingTab, type App, type Setting, type SettingDefinitionItem } from "obsidian";
+import { Notice, Platform, PluginSettingTab, type App, type Setting, type SettingDefinitionItem } from "obsidian";
+import { joinPathEntries, splitPathEntries } from "./cliEnv";
 import type IcloudPlugin from "./main";
 
 export class IcloudSettingTab extends PluginSettingTab {
@@ -151,16 +152,21 @@ export class IcloudSettingTab extends PluginSettingTab {
 				},
 				{
 					name: "Extra PATH entries",
-					desc: "Colon-separated directories to prepend to PATH when spawning icloud-md, such as wherever your Node version manager installs global binaries. GUI-launched Obsidian doesn't inherit your shell's PATH.",
+					desc:
+						`${Platform.isWin ? "Semicolon" : "Colon"}-separated directories to prepend to PATH when spawning ` +
+						"icloud-md, such as wherever npm or your Node version manager installs global binaries. " +
+						"GUI-launched Obsidian doesn't inherit your shell's PATH.",
 					render: (setting: Setting) => {
 						setting.addText((text) =>
 							text
-								.setPlaceholder("/usr/local/bin:/opt/homebrew/bin")
-								.setValue(this.plugin.localStorage.getPathAdditions().join(":"))
+								.setPlaceholder(
+									Platform.isWin
+										? String.raw`C:\Users\you\AppData\Roaming\npm`
+										: "/usr/local/bin:/opt/homebrew/bin",
+								)
+								.setValue(joinPathEntries(this.plugin.localStorage.getPathAdditions(), Platform.isWin))
 								.onChange((value) =>
-									this.plugin.localStorage.setPathAdditions(
-										value.split(":").filter((entry) => entry.length > 0),
-									),
+									this.plugin.localStorage.setPathAdditions(splitPathEntries(value, Platform.isWin)),
 								),
 						);
 					},

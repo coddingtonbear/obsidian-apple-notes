@@ -1,4 +1,5 @@
-import type { App } from "obsidian";
+import { Platform, type App } from "obsidian";
+import { joinPathEntries, splitPathEntries } from "./cliEnv";
 import type IcloudPlugin from "./main";
 
 /**
@@ -23,12 +24,14 @@ export class LocalStorageSettings {
 		this.app.saveLocalStorage(this.prefix + "binaryPath", value);
 	}
 
+	/** Stored in the platform's own PATH syntax, so the value can be pasted
+	 * straight in from (and out to) a shell on that machine. */
 	getPathAdditions(): string[] {
 		const raw = this.app.loadLocalStorage(this.prefix + "pathAdditions") as string | null;
-		return raw ? raw.split(":").filter((entry) => entry.length > 0) : [];
+		return raw ? splitPathEntries(raw, Platform.isWin) : [];
 	}
 
 	setPathAdditions(value: string[]): void {
-		this.app.saveLocalStorage(this.prefix + "pathAdditions", value.join(":"));
+		this.app.saveLocalStorage(this.prefix + "pathAdditions", joinPathEntries(value, Platform.isWin));
 	}
 }

@@ -88,11 +88,21 @@ Once connected, the settings tab offers:
 ### Advanced settings
 
 - **icloud-md binary location** — leave blank to use `icloud-md` from your
-  `PATH`, or set an explicit path if Obsidian can't find it.
-- **Extra PATH entries** — colon-separated directories to prepend to `PATH`
-  when spawning `icloud-md` (for example, wherever your Node version manager
-  installs global binaries). Useful because a GUI-launched Obsidian doesn't
-  inherit your shell's `PATH`.
+  `PATH`, or set an explicit path if Obsidian can't find it. The directory
+  containing it is added to `PATH` automatically, so with a Node version
+  manager this also lets `icloud-md` find the `node` sitting beside it.
+- **Extra PATH entries** — directories to prepend to `PATH` when spawning
+  `icloud-md` (for example, wherever your Node version manager installs global
+  binaries). Useful because a GUI-launched Obsidian doesn't inherit your
+  shell's `PATH`. Separate multiple directories the way your platform's `PATH`
+  does: with `;` on Windows, `:` elsewhere.
+
+Finding the right values:
+
+| Platform | Command | Typical result |
+| --- | --- | --- |
+| macOS / Linux | `which icloud-md` | `/Users/you/.nvm/versions/node/v24.14.1/bin/icloud-md` |
+| Windows | `where icloud-md` | `C:\Users\you\AppData\Roaming\npm\icloud-md.cmd` |
 
 ## Commands
 
