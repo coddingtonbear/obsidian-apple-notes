@@ -61,11 +61,18 @@ export class IcloudSettingTab extends PluginSettingTab {
 									return;
 								}
 								button.setDisabled(true).setButtonText("Connecting...");
-								const success = await this.plugin.connect();
-								if (success) {
-									this.update();
-								} else {
-									button.setDisabled(false).setButtonText("Connect");
+								let success = false;
+								try {
+									success = await this.plugin.connect();
+								} finally {
+									// connect() reports its own failures and shouldn't throw, but a
+									// button left disabled by something it didn't anticipate would
+									// strand the settings pane with no way to retry.
+									if (success) {
+										this.update();
+									} else {
+										button.setDisabled(false).setButtonText("Connect");
+									}
 								}
 							}),
 					);

@@ -2,6 +2,8 @@ import { FileSystemAdapter, Menu, Notice, Plugin, normalizePath } from "obsidian
 import * as nodePath from "node:path";
 import { LocalStorageSettings } from "./localStorageSettings";
 import { PeriodicSync } from "./periodicSync";
+import { CONNECT_HEADLINE, REAUTHENTICATE_HEADLINE, SIGN_IN_PATIENCE } from "./progressMessages";
+import { ProgressNotice } from "./progressNotice";
 import { DEFAULT_SETTINGS, type IcloudSettings } from "./settings";
 import { IcloudSettingTab } from "./settingsTab";
 import { IcloudStatusBar } from "./statusBar";
@@ -11,6 +13,20 @@ import { cloneIcloudMd, pullIcloudMd, pushIcloudMd, reauthenticateIcloudMd, stat
 // Obsidian's plugin review type-checks without @types/node, so node:path resolves
 // to `any`; pin join() to an explicit signature to keep the call typed.
 const path = nodePath as unknown as { join: (...segments: string[]) => string };
+
+/** Message for something thrown outside icloud-md's structured error contract - a bad vault
+ * adapter, a failed settings write. Non-Error throws have no message worth showing, so they get
+ * a generic line and the value itself goes to the console for a bug report. */
+function errorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	if (typeof error === "string") {
+		return error;
+	}
+	console.error("Apple Notes sync: unexpected error", error);
+	return "an unexpected error occurred (see the developer console)";
+}
 
 export type SyncState =
 	| { kind: "disconnected" }
@@ -103,22 +119,29 @@ export default class IcloudPlugin extends Plugin {
 
 	/** The settings tab's Connect button - runs `clone`, and on success flips the plugin
 	 * into the "connected" state. Returns whether it succeeded, so the settings tab knows
-	 * whether to re-render into the connected view. */
+	 * whether to re-render into the connected view. Never throws: the caller has a disabled
+	 * button to restore, and an unexpected failure has to reach the user as a notice rather
+	 * than as an unhandled rejection in the developer console. */
 	async connect(): Promise<boolean> {
-		const targetDir = this.getTargetDir();
+		const progress = new ProgressNotice(CONNECT_HEADLINE, SIGN_IN_PATIENCE);
 		this.setSyncState({ kind: "syncing", label: "Connecting" });
-		const result = await this.syncQueue.run(() => cloneIcloudMd(this, targetDir));
-		if (result.ok === false) {
-			new Notice(`Apple Notes connect failed: ${result.error.message}`);
-			this.setSyncState({ kind: "error", message: result.error.message });
-			return false;
+		try {
+			const targetDir = this.getTargetDir();
+			const result = await this.syncQueue.run(() => cloneIcloudMd(this, targetDir, progress.callOptions));
+			if (result.ok === false) {
+				return this.reportFailure("connect", result.error.message);
+			}
+			this.settings.connected = true;
+			await this.saveSettings();
+			this.periodicSync.reload();
+			new Notice(`Apple Notes: cloned ${result.data.written} note(s) into ${this.settings.folder}.`);
+			this.setSyncState({ kind: "idle" });
+			return true;
+		} catch (error) {
+			return this.reportFailure("connect", errorMessage(error));
+		} finally {
+			progress.hide();
 		}
-		this.settings.connected = true;
-		await this.saveSettings();
-		this.periodicSync.reload();
-		new Notice(`Apple Notes: cloned ${result.data.written} note(s) into ${this.settings.folder}.`);
-		this.setSyncState({ kind: "idle" });
-		return true;
 	}
 
 	/** Plugin-local only: forgets the binding and stops auto-sync. Leaves the cloned files
@@ -172,13 +195,21 @@ export default class IcloudPlugin extends Plugin {
 		if (!this.requireConnected()) {
 			return;
 		}
-		new Notice("Apple Notes: opening a browser window for sign-in...");
-		const result = await this.syncQueue.run(() => reauthenticateIcloudMd(this, this.getTargetDir()));
-		if (result.ok === false) {
-			new Notice(`Apple Notes reauthenticate failed: ${result.error.message}`);
-			return;
+		const progress = new ProgressNotice(REAUTHENTICATE_HEADLINE, SIGN_IN_PATIENCE);
+		try {
+			const result = await this.syncQueue.run(() =>
+				reauthenticateIcloudMd(this, this.getTargetDir(), progress.callOptions),
+			);
+			if (result.ok === false) {
+				new Notice(`Apple Notes reauthenticate failed: ${result.error.message}`);
+				return;
+			}
+			new Notice(`Apple Notes: reauthenticated as ${result.data.appleId}.`);
+		} catch (error) {
+			new Notice(`Apple Notes reauthenticate failed: ${errorMessage(error)}`);
+		} finally {
+			progress.hide();
 		}
-		new Notice(`Apple Notes: reauthenticated as ${result.data.appleId}.`);
 	}
 
 	async showStatus(): Promise<void> {
@@ -215,6 +246,14 @@ export default class IcloudPlugin extends Plugin {
 			return;
 		}
 		this.setSyncState({ kind: "idle", pendingCount: result.data.entries.length });
+	}
+
+	/** Surfaces a failed action the same way whether icloud-md reported it or something
+	 * unexpected threw. Returns false so `connect()` can `return this.reportFailure(...)`. */
+	private reportFailure(action: string, message: string): false {
+		new Notice(`Apple Notes ${action} failed: ${message}`);
+		this.setSyncState({ kind: "error", message });
+		return false;
 	}
 
 	private requireConnected(): boolean {

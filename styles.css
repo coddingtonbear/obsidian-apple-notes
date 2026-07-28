@@ -1,3 +1,14 @@
 .icloud-status-bar-text {
 	margin-left: 4px;
 }
+
+.icloud-notice-headline {
+	font-weight: var(--font-semibold);
+}
+
+/* Live status from icloud-md - secondary to the "this takes a while" explanation above it. */
+.icloud-notice-status {
+	margin-top: var(--size-4-2);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
