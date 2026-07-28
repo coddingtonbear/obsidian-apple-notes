@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseErrorPayload, parseProgressLine } from "./icloudMdProtocol";
+import { parseErrorPayload, parseProgressLine, parseResultPayload } from "./icloudMdProtocol";
 
 void test("parseProgressLine parses each greppable progress event", () => {
 	assert.deepEqual(parseProgressLine("icloud-md:progress:fetch:42"), { type: "fetch", recordsSoFar: 42 });
@@ -42,4 +42,45 @@ void test("parseErrorPayload extracts the trailing JSON error blob amid interlea
 
 void test("parseErrorPayload returns undefined for stderr with no structured payload", () => {
 	assert.equal(parseErrorPayload("spawn icloud-md ENOENT\n"), undefined);
+});
+
+interface TestSummary {
+	written: number;
+}
+
+void test("parseResultPayload reads a clean JSON result", () => {
+	assert.deepEqual(parseResultPayload<TestSummary>('{\n  "written": 311\n}\n'), { value: { written: 311 } });
+});
+
+void test("parseResultPayload finds the result after tool output that polluted stdout", () => {
+	// icloud-md shells out to Playwright's installer on first sign-in, and its
+	// download progress lands on stdout ahead of the JSON payload.
+	const stdout = [
+		"Downloading Chromium 141.0.7390.37 (playwright build v1194) from https://cdn.playwright.dev/chromium-win64.zip",
+		"|████████████████| 100% of 141.2 MiB",
+		"Chromium 141.0.7390.37 downloaded to C:\\Users\\me\\AppData\\Local\\ms-playwright\\chromium-1194",
+		"{",
+		'  "written": 311',
+		"}",
+		"",
+	].join("\n");
+
+	assert.deepEqual(parseResultPayload<TestSummary>(stdout), { value: { written: 311 } });
+});
+
+void test("parseResultPayload ignores braces appearing in the noise before the payload", () => {
+	const stdout = ['Resolving {chromium} build...\n{\n  "written": 1\n}\n'].join("");
+	assert.deepEqual(parseResultPayload<TestSummary>(stdout), { value: { written: 1 } });
+});
+
+void test("parseResultPayload accepts payload shapes other than an object", () => {
+	// The trailing-object scan only recognises "{", so a clean stream has to
+	// keep parsing whole - otherwise an array or scalar result would regress.
+	assert.deepEqual(parseResultPayload<number[]>("[1, 2, 3]\n"), { value: [1, 2, 3] });
+	assert.deepEqual(parseResultPayload<null>("null\n"), { value: null });
+});
+
+void test("parseResultPayload returns undefined when stdout holds no JSON at all", () => {
+	assert.equal(parseResultPayload("Downloading Chromium...\n"), undefined);
+	assert.equal(parseResultPayload(""), undefined);
 });
