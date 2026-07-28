@@ -97,6 +97,15 @@ void test("buildEnv does not repeat the binary directory already listed by the u
 	assert.equal(env["PATH"], "/opt/bin:/usr/bin");
 });
 
+void test("buildEnv writes the exact PATH name off Windows, where casing is significant", () => {
+	// A POSIX environment carrying an unrelated `Path` must not be mistaken
+	// for PATH; only Windows treats the two names as the same variable.
+	const env = buildEnv({ Path: "/something/else", PATH: "/usr/bin" }, ["/opt/bin"], "", POSIX);
+
+	assert.equal(env["PATH"], "/opt/bin:/usr/bin");
+	assert.equal(env["Path"], "/something/else");
+});
+
 void test("buildEnv copies rather than mutates the environment it is given", () => {
 	const base = { PATH: "/usr/bin" };
 	buildEnv(base, ["/opt/bin"], "", POSIX);

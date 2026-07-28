@@ -48,6 +48,17 @@ export function parseProgressLine(line: string): IcloudMdProgress | undefined {
  * "Downloading Chromium..." progress being the observed case.
  */
 function parseTrailingJson(text: string): unknown {
+	// A clean stream parses whole, which keeps any shape of payload working -
+	// the scan below only recognises a trailing *object*.
+	const whole = text.trim();
+	if (whole.length > 0) {
+		try {
+			return JSON.parse(whole);
+		} catch {
+			// Not pure JSON; fall through to locating the trailing payload.
+		}
+	}
+
 	const start = text.lastIndexOf("\n{");
 	const jsonText = start === -1 ? (text.trimStart().startsWith("{") ? text : undefined) : text.slice(start + 1);
 	if (!jsonText) {

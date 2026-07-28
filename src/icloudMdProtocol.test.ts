@@ -73,6 +73,13 @@ void test("parseResultPayload ignores braces appearing in the noise before the p
 	assert.deepEqual(parseResultPayload<TestSummary>(stdout), { value: { written: 1 } });
 });
 
+void test("parseResultPayload accepts payload shapes other than an object", () => {
+	// The trailing-object scan only recognises "{", so a clean stream has to
+	// keep parsing whole - otherwise an array or scalar result would regress.
+	assert.deepEqual(parseResultPayload<number[]>("[1, 2, 3]\n"), { value: [1, 2, 3] });
+	assert.deepEqual(parseResultPayload<null>("null\n"), { value: null });
+});
+
 void test("parseResultPayload returns undefined when stdout holds no JSON at all", () => {
 	assert.equal(parseResultPayload("Downloading Chromium...\n"), undefined);
 	assert.equal(parseResultPayload(""), undefined);

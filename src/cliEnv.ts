@@ -111,7 +111,10 @@ export function buildEnv(
 		return env;
 	}
 
-	const key = envKeyOf(env, "PATH") ?? "PATH";
+	// Only Windows treats env names case-insensitively. Elsewhere `PATH` and
+	// `Path` are genuinely different variables, so searching for one would be
+	// wrong: write the exact name, as this always has.
+	const key = isWin ? (envKeyOf(env, "PATH") ?? "PATH") : "PATH";
 	const existing = env[key];
 	env[key] = joinPathEntries(existing ? [...prefixes, existing] : prefixes, isWin);
 	return env;
