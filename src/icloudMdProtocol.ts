@@ -38,26 +38,41 @@ export function parseProgressLine(line: string): IcloudMdProgress | undefined {
 	}
 }
 
-/** The final catch in icloud-md's `main()` writes one pretty-printed JSON payload as the last thing on stderr; find it amid any progress/status lines that preceded it. */
-export function parseErrorPayload(stderr: string): IcloudMdErrorPayload | undefined {
-	const start = stderr.lastIndexOf("\n{");
-	const jsonText = start === -1 ? (stderr.trimStart().startsWith("{") ? stderr : undefined) : stderr.slice(start + 1);
+/**
+ * icloud-md pretty-prints one JSON payload as the last thing on the stream,
+ * so the object starts at column 0 on its own line: locate that last `\n{`
+ * and parse from there, tolerating anything printed before it.
+ *
+ * Tolerance matters because `--json` mode's stdout-is-pure-JSON contract can
+ * be broken by tools icloud-md itself shells out to - Playwright's first-run
+ * "Downloading Chromium..." progress being the observed case.
+ */
+function parseTrailingJson(text: string): unknown {
+	const start = text.lastIndexOf("\n{");
+	const jsonText = start === -1 ? (text.trimStart().startsWith("{") ? text : undefined) : text.slice(start + 1);
 	if (!jsonText) {
 		return undefined;
 	}
 	try {
-		const parsed: unknown = JSON.parse(jsonText);
-		if (
-			typeof parsed === "object" &&
-			parsed !== null &&
-			"error" in parsed &&
-			"message" in parsed &&
-			"exitCode" in parsed
-		) {
-			return parsed as IcloudMdErrorPayload;
-		}
+		return JSON.parse(jsonText);
 	} catch {
-		// stderr wasn't a structured error payload (e.g. spawn() failure) - fall through.
+		return undefined;
+	}
+}
+
+/** The successful command result from stdout, or undefined if stdout held no parseable payload. Wrapped so a payload that is itself falsy stays distinguishable from "nothing found". */
+export function parseResultPayload<T>(stdout: string): { value: T } | undefined {
+	const parsed = parseTrailingJson(stdout);
+	return parsed === undefined ? undefined : { value: parsed as T };
+}
+
+/** The final catch in icloud-md's `main()` writes one pretty-printed JSON payload as the last thing on stderr; find it amid any progress/status lines that preceded it. */
+export function parseErrorPayload(stderr: string): IcloudMdErrorPayload | undefined {
+	// Anything else (e.g. a spawn() failure, or plain text) isn't a
+	// structured error payload.
+	const parsed = parseTrailingJson(stderr);
+	if (typeof parsed === "object" && parsed !== null && "error" in parsed && "message" in parsed && "exitCode" in parsed) {
+		return parsed as IcloudMdErrorPayload;
 	}
 	return undefined;
 }

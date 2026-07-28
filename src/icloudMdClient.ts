@@ -1,5 +1,11 @@
 import { runIcloudMd } from "./cliRunner";
-import { parseErrorPayload, parseProgressLine, type IcloudMdErrorPayload, type IcloudMdProgress } from "./icloudMdProtocol";
+import {
+	parseErrorPayload,
+	parseProgressLine,
+	parseResultPayload,
+	type IcloudMdErrorPayload,
+	type IcloudMdProgress,
+} from "./icloudMdProtocol";
 import type IcloudPlugin from "./main";
 
 export type { IcloudMdErrorPayload, IcloudMdProgress };
@@ -14,6 +20,15 @@ export type IcloudMdCallResult<T> = { ok: true; data: T } | { ok: false; error: 
 
 /** `status`/`push --dry-run` use exit code 3 to mean "succeeded, action needed" - stdout still has valid JSON. Anything else non-zero is a real failure. */
 const SUCCESS_CODES = new Set([0, 3]);
+
+/** A short, single-line excerpt of unexpected output, for an error message a user can act on. */
+function summarizeOutput(output: string): string {
+	const trimmed = output.trim().replace(/\s+/g, " ");
+	if (trimmed.length === 0) {
+		return "(no output)";
+	}
+	return trimmed.length > 200 ? `${trimmed.slice(0, 200)}...` : trimmed;
+}
 
 function splitOutputLine(line: string, options: IcloudMdCallOptions): void {
 	const progress = parseProgressLine(line);
@@ -52,7 +67,21 @@ export async function runIcloudMdJson<T>(
 		return { ok: false, error: { error: "SpawnError", message: result.error.message, exitCode: -1 } };
 	}
 	if (result.code !== null && SUCCESS_CODES.has(result.code)) {
-		return { ok: true, data: JSON.parse(result.stdout) as T };
+		const payload = parseResultPayload<T>(result.stdout);
+		if (payload) {
+			return { ok: true, data: payload.value };
+		}
+		// The command succeeded but stdout held no JSON we could find. Report
+		// it rather than letting JSON.parse throw into an unhandled rejection,
+		// which surfaced only in the developer console.
+		return {
+			ok: false,
+			error: {
+				error: "UnreadableOutput",
+				message: `icloud-md succeeded but its output could not be read as JSON: ${summarizeOutput(result.stdout)}`,
+				exitCode: result.code,
+			},
+		};
 	}
 	return {
 		ok: false,
