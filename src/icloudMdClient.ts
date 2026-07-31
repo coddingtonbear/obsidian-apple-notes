@@ -107,6 +107,26 @@ export interface PullNotice {
 	message: string;
 }
 
+export type PullChangeKind = "add" | "update" | "merge" | "remove" | "move" | "untrack";
+
+export interface PullChangeRemark {
+	tone: "conflict" | "unsyncable" | "note";
+	message: string;
+}
+
+/** One file-level thing a pull did, mirroring icloud-md's `PullChange`. Paths
+ * are relative to the sync folder, POSIX-separated. */
+export interface PullChange {
+	kind: PullChangeKind;
+	file: string;
+	previousFile?: string;
+	/** Set by `--defer-renames`: the path this file should be renamed to, which
+	 * pull deliberately did *not* rename it to - we perform it through
+	 * Obsidian instead, so wikilinks get rewritten. See `deferredRenames.ts`. */
+	pendingRename?: string;
+	remarks?: PullChangeRemark[];
+}
+
 export interface PullSummary {
 	added: number;
 	updated: number;
@@ -117,6 +137,7 @@ export interface PullSummary {
 	skippedNewUnsyncable: number;
 	droppedUnsyncable: number;
 	unsharedUntracked: number;
+	changes: PullChange[];
 	conflicts: string[];
 	notices: PullNotice[];
 }
@@ -157,7 +178,10 @@ export function cloneIcloudMd(plugin: IcloudPlugin, targetDir: string, options?:
 }
 
 export function pullIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {
-	return runIcloudMdJson<PullSummary>(plugin, ["pull", targetDir], options);
+	// Renames a remote retitle wants are deferred so we can perform them
+	// through Obsidian's file manager, which rewrites wikilinks - see
+	// `deferredRenames.ts`. Requires icloud-md >= 0.5.0.
+	return runIcloudMdJson<PullSummary>(plugin, ["pull", "--defer-renames", targetDir], options);
 }
 
 export function pushIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {

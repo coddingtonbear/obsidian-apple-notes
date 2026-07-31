@@ -8,7 +8,15 @@ import { DEFAULT_SETTINGS, type IcloudSettings } from "./settings";
 import { IcloudSettingTab } from "./settingsTab";
 import { IcloudStatusBar } from "./statusBar";
 import { SyncQueue } from "./syncQueue";
-import { cloneIcloudMd, pullIcloudMd, pushIcloudMd, reauthenticateIcloudMd, statusIcloudMd } from "./icloudMdClient";
+import {
+	cloneIcloudMd,
+	pullIcloudMd,
+	pushIcloudMd,
+	reauthenticateIcloudMd,
+	statusIcloudMd,
+	type PullSummary,
+} from "./icloudMdClient";
+import { collectDeferredRenames, performDeferredRenames, type VaultRenamer } from "./deferredRenames";
 
 // Obsidian's plugin review type-checks without @types/node, so node:path resolves
 // to `any`; pin join() to an explicit signature to keep the call typed.
@@ -166,11 +174,45 @@ export default class IcloudPlugin extends Plugin {
 			this.setSyncState({ kind: "error", message: result.error.message });
 			return;
 		}
+		const renamed = await this.performDeferredRenames(result.data.changes);
 		const { added, updated, removed } = result.data;
-		if (!options.quiet || added + updated + removed > 0) {
-			new Notice(`Apple Notes pull: ${added} added, ${updated} updated, ${removed} removed.`);
+		if (!options.quiet || added + updated + removed + renamed > 0) {
+			const renameSuffix = renamed > 0 ? `, ${renamed} renamed` : "";
+			new Notice(`Apple Notes pull: ${added} added, ${updated} updated, ${removed} removed${renameSuffix}.`);
 		}
 		await this.refreshStatus();
+	}
+
+	/** Pull runs with `--defer-renames`, so a remote retitle leaves the file
+	 * where it was and reports the rename it wanted; carrying it out through
+	 * Obsidian's file manager here is what keeps wikilinks pointing at the
+	 * note. icloud-md recognises the completed rename by note id on its next
+	 * run, and keeps re-reporting any we couldn't perform - so a blocked or
+	 * failed rename only needs a notice, not recovery. Returns how many were
+	 * performed. */
+	private async performDeferredRenames(changes: PullSummary["changes"]): Promise<number> {
+		const renames = collectDeferredRenames(changes, normalizePath(this.settings.folder));
+		if (renames.length === 0) {
+			return 0;
+		}
+		const vault: VaultRenamer = {
+			exists: (path) => this.app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
+			rename: async (from, to) => {
+				const file = this.app.vault.getAbstractFileByPath(normalizePath(from));
+				if (file === null) {
+					throw new Error("the file is no longer there");
+				}
+				await this.app.fileManager.renameFile(file, normalizePath(to));
+			},
+		};
+		const outcome = await performDeferredRenames(renames, vault);
+		for (const blocked of outcome.blocked) {
+			new Notice(`Apple Notes: "${blocked.from}" should become "${blocked.to}", but something already has that name.`);
+		}
+		for (const failed of outcome.failed) {
+			new Notice(`Apple Notes: renaming "${failed.rename.from}" to "${failed.rename.to}" failed: ${failed.message}`);
+		}
+		return outcome.performed.length;
 	}
 
 	async push(options: { quiet?: boolean } = {}): Promise<void> {
