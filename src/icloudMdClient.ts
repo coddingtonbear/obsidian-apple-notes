@@ -173,6 +173,10 @@ export interface ReauthenticateResult {
 	targetDir: string;
 }
 
+export interface VersionInfo {
+	version: string;
+}
+
 export interface CloneOptions {
 	/** icloud-md only accepts `--filename-as-title` at clone time, which is why
 	 * the corresponding setting locks once connected. */
@@ -206,4 +210,11 @@ export function statusIcloudMd(plugin: IcloudPlugin, targetDir: string, options?
 
 export function reauthenticateIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {
 	return runIcloudMdJson<ReauthenticateResult>(plugin, ["reauthenticate", targetDir], options);
+}
+
+/** `icloud-md --json --version`, JSON-shaped since 0.4.0. Older releases don't
+ * know the flag at all and exit with a usage error - `assessVersion` reads
+ * that failure as "old release" rather than as a broken install. */
+export function versionIcloudMd(plugin: IcloudPlugin, options?: IcloudMdCallOptions) {
+	return runIcloudMdJson<VersionInfo>(plugin, ["--version"], options);
 }

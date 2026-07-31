@@ -1,8 +1,16 @@
 import { Notice, Platform, PluginSettingTab, type App, type Setting, type SettingDefinitionItem } from "obsidian";
 import { joinPathEntries, splitPathEntries } from "./cliEnv";
+import { versionIcloudMd } from "./icloudMdClient";
 import type IcloudPlugin from "./main";
+import { assessVersion, MINIMUM_ICLOUD_MD_VERSION, type VersionAssessment } from "./versionCheck";
 
 export class IcloudSettingTab extends PluginSettingTab {
+	/** Result of the icloud-md version probe, cached for as long as the tab
+	 * stays open; hide() clears it so the next open re-checks (the user
+	 * plausibly just updated icloud-md). Null until a probe completes. */
+	private versionAssessment: VersionAssessment | null = null;
+	private versionCheckInFlight = false;
+
 	constructor(
 		app: App,
 		private readonly plugin: IcloudPlugin,
@@ -11,11 +19,65 @@ export class IcloudSettingTab extends PluginSettingTab {
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
+		this.ensureVersionChecked();
 		const items: SettingDefinitionItem[] = this.plugin.settings.connected
 			? this.connectedDefinitions()
 			: this.notConnectedDefinitions();
+		const warning = this.versionWarningDefinition();
+		if (warning) {
+			items.unshift(warning);
+		}
 		items.push(this.advancedGroup());
 		return items;
+	}
+
+	hide(): void {
+		this.versionAssessment = null;
+		super.hide();
+	}
+
+	/** Starts one version probe per tab open. Deliberately not routed through the
+	 * sync queue: `--version` touches no state, and the warning shouldn't have to
+	 * wait behind a long pull. Warn-only - nothing is gated on the outcome. */
+	private ensureVersionChecked(): void {
+		if (this.versionAssessment !== null || this.versionCheckInFlight) {
+			return;
+		}
+		this.versionCheckInFlight = true;
+		void versionIcloudMd(this.plugin).then((result) => {
+			this.versionCheckInFlight = false;
+			this.versionAssessment = assessVersion(result);
+			if (this.versionWarningDefinition() !== null) {
+				this.update();
+			}
+		});
+	}
+
+	private versionWarningDefinition(): SettingDefinitionItem | null {
+		const markWarning = (setting: Setting) => setting.nameEl.addClass("mod-warning");
+		switch (this.versionAssessment?.kind) {
+			case "outdated":
+				return {
+					name: "icloud-md needs an update",
+					desc:
+						`Version ${this.versionAssessment.version} was found, but this plugin expects ` +
+						`${MINIMUM_ICLOUD_MD_VERSION} or newer. Syncing may still work, but renames from Apple Notes ` +
+						"won't be handled properly. Update with: npm install -g icloud-md",
+					render: markWarning,
+				};
+			case "unknown":
+				return {
+					name: "icloud-md version could not be determined",
+					desc:
+						"icloud-md ran but didn't report a readable version, which usually means a release older " +
+						`than this plugin expects (${MINIMUM_ICLOUD_MD_VERSION} or newer). ` +
+						"Update with: npm install -g icloud-md",
+					render: markWarning,
+				};
+			default:
+				// ok, unavailable (a missing binary is surfaced elsewhere), or still probing.
+				return null;
+		}
 	}
 
 	/** Persist control changes and run the side effects the old onChange handlers did. */
