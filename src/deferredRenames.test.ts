@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { collectDeferredRenames, performDeferredRenames, type DeferredRename, type VaultRenamer } from "./deferredRenames";
-import type { PullChange } from "./icloudMdClient";
+import {
+	collectDeferredRenames,
+	collectStatusRenames,
+	performDeferredRenames,
+	type DeferredRename,
+	type VaultRenamer,
+} from "./deferredRenames";
+import type { PullChange, SerializedPlanEntry } from "./icloudMdClient";
 
 const change = (partial: Partial<PullChange> & Pick<PullChange, "file">): PullChange => ({
 	kind: "update",
@@ -37,6 +43,42 @@ void test("collectDeferredRenames handles a vault-root folder and a trailing sla
 	assert.deepEqual(collectDeferredRenames(changes, ""), [{ from: "Note.md", to: "Renamed.md" }]);
 	assert.deepEqual(collectDeferredRenames(changes, "Apple Notes/"), [
 		{ from: "Apple Notes/Note.md", to: "Apple Notes/Renamed.md" },
+	]);
+});
+
+const entry = (partial: Partial<SerializedPlanEntry> & Pick<SerializedPlanEntry, "kind" | "file">): SerializedPlanEntry => ({
+	resolution: "conflict",
+	...partial,
+});
+
+void test("collectStatusRenames maps outstanding rename entries into the vault folder", () => {
+	const entries = [
+		entry({ kind: "rename", file: "Groceries 2.md", pendingRename: "Groceries.md" }),
+		entry({ kind: "rename", file: "Recipes/Old.md", pendingRename: "Recipes/New.md" }),
+	];
+	assert.deepEqual(collectStatusRenames(entries, "Apple Notes"), [
+		{ from: "Apple Notes/Groceries 2.md", to: "Apple Notes/Groceries.md" },
+		{ from: "Apple Notes/Recipes/Old.md", to: "Apple Notes/Recipes/New.md" },
+	]);
+});
+
+void test("collectStatusRenames ignores other entry kinds and renames without a distinct target", () => {
+	const entries = [
+		entry({ kind: "update", file: "Changed.md", resolution: "ready" }),
+		entry({ kind: "move", file: "Moved.md", previousFile: "Elsewhere/Moved.md", resolution: "ready" }),
+		// A move entry can carry the note's tracked path in other fields;
+		// only kind "rename" means "this file should be renamed by us".
+		entry({ kind: "update", file: "Odd.md", pendingRename: "Odder.md", resolution: "ready" }),
+		entry({ kind: "rename", file: "NoTarget.md" }),
+		entry({ kind: "rename", file: "Same.md", pendingRename: "Same.md" }),
+	];
+	assert.deepEqual(collectStatusRenames(entries, "Apple Notes"), []);
+});
+
+void test("collectStatusRenames tolerates missing entries and a vault-root folder", () => {
+	assert.deepEqual(collectStatusRenames(undefined, "Apple Notes"), []);
+	assert.deepEqual(collectStatusRenames([entry({ kind: "rename", file: "A.md", pendingRename: "B.md" })], ""), [
+		{ from: "A.md", to: "B.md" },
 	]);
 });
 

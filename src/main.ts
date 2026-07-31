@@ -14,9 +14,14 @@ import {
 	pushIcloudMd,
 	reauthenticateIcloudMd,
 	statusIcloudMd,
-	type PullSummary,
 } from "./icloudMdClient";
-import { collectDeferredRenames, performDeferredRenames, type VaultRenamer } from "./deferredRenames";
+import {
+	collectDeferredRenames,
+	collectStatusRenames,
+	performDeferredRenames,
+	type DeferredRename,
+	type VaultRenamer,
+} from "./deferredRenames";
 
 // Obsidian's plugin review type-checks without @types/node, so node:path resolves
 // to `any`; pin join() to an explicit signature to keep the call typed.
@@ -176,7 +181,9 @@ export default class IcloudPlugin extends Plugin {
 			this.setSyncState({ kind: "error", message: result.error.message });
 			return;
 		}
-		const renamed = await this.performDeferredRenames(result.data.changes);
+		const renamed = await this.performRenames(
+			collectDeferredRenames(result.data.changes, normalizePath(this.settings.folder)),
+		);
 		const { added, updated, removed } = result.data;
 		if (!options.quiet || added + updated + removed + renamed > 0) {
 			const renameSuffix = renamed > 0 ? `, ${renamed} renamed` : "";
@@ -189,11 +196,18 @@ export default class IcloudPlugin extends Plugin {
 	 * where it was and reports the rename it wanted; carrying it out through
 	 * Obsidian's file manager here is what keeps wikilinks pointing at the
 	 * note. icloud-md recognises the completed rename by note id on its next
-	 * run, and keeps re-reporting any we couldn't perform - so a blocked or
-	 * failed rename only needs a notice, not recovery. Returns how many were
-	 * performed. */
-	private async performDeferredRenames(changes: PullSummary["changes"]): Promise<number> {
-		const renames = collectDeferredRenames(changes, normalizePath(this.settings.folder));
+	 * run - nothing needs to be reported back. One we *couldn't* perform stays
+	 * pending in icloud-md's state; pull is incremental and won't mention it
+	 * again until the note changes remotely, but status lists every
+	 * outstanding rename, and `refreshStatus`'s sweep retries them there.
+	 * Returns how many were performed. `quietBlocked` suppresses the
+	 * occupied-target notices: the sweep retries on every refresh, right after
+	 * a pull that already reported those same blocks, and repeating the notice
+	 * each cycle would turn one stuck name into a drumbeat. */
+	private async performRenames(
+		renames: readonly DeferredRename[],
+		options: { quietBlocked?: boolean } = {},
+	): Promise<number> {
 		if (renames.length === 0) {
 			return 0;
 		}
@@ -208,8 +222,12 @@ export default class IcloudPlugin extends Plugin {
 			},
 		};
 		const outcome = await performDeferredRenames(renames, vault);
-		for (const blocked of outcome.blocked) {
-			new Notice(`Apple Notes: "${blocked.from}" should become "${blocked.to}", but something already has that name.`);
+		if (options.quietBlocked !== true) {
+			for (const blocked of outcome.blocked) {
+				new Notice(
+					`Apple Notes: "${blocked.from}" should become "${blocked.to}", but something already has that name.`,
+				);
+			}
 		}
 		for (const failed of outcome.failed) {
 			new Notice(`Apple Notes: renaming "${failed.rename.from}" to "${failed.rename.to}" failed: ${failed.message}`);
@@ -289,7 +307,18 @@ export default class IcloudPlugin extends Plugin {
 			this.setSyncState({ kind: "error", message: result.error.message });
 			return;
 		}
-		this.setSyncState({ kind: "idle", pendingCount: result.data.entries.length });
+		// The sweep: status lists every rename some `pull --defer-renames` left
+		// outstanding - one run outside the plugin, or one we couldn't perform
+		// earlier - so each refresh is a chance to finish them through Obsidian
+		// and get back to a clean slate. Renames this plugin performed moments
+		// ago don't reappear here: status recognises them as completed before
+		// building its plan.
+		const renames = collectStatusRenames(result.data.entries, normalizePath(this.settings.folder));
+		const performed = await this.performRenames(renames, { quietBlocked: true });
+		if (performed > 0) {
+			new Notice(`Apple Notes: completed ${performed} deferred rename(s) from an earlier sync.`);
+		}
+		this.setSyncState({ kind: "idle", pendingCount: result.data.entries.length - performed });
 	}
 
 	/** Surfaces a failed action the same way whether icloud-md reported it or something

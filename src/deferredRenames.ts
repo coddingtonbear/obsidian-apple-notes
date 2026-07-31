@@ -12,7 +12,7 @@
  * `VaultRenamer` interface) so it can be unit-tested under plain Node.
  */
 
-import type { PullChange } from "./icloudMdClient";
+import type { PullChange, SerializedPlanEntry } from "./icloudMdClient";
 
 /** One rename pull asked for, in vault-relative paths. */
 export interface DeferredRename {
@@ -39,6 +39,26 @@ export function collectDeferredRenames(changes: readonly PullChange[] | undefine
 	return renames;
 }
 
+/** The renames a status listing says are still outstanding. Pull is
+ * incremental and only re-reports a deferred rename when the note changes
+ * remotely again - so one left behind by a `pull --defer-renames` outside the
+ * plugin (or one we couldn't perform earlier) would otherwise sit unresolved
+ * indefinitely. Status rebuilds its plan from tracked state every run and
+ * lists every outstanding rename, which makes any status refresh a chance to
+ * finish them and get back to a clean slate. */
+export function collectStatusRenames(
+	entries: readonly SerializedPlanEntry[] | undefined,
+	folder: string,
+): DeferredRename[] {
+	const renames: DeferredRename[] = [];
+	for (const entry of entries ?? []) {
+		if (entry.kind === "rename" && entry.pendingRename !== undefined && entry.pendingRename !== entry.file) {
+			renames.push({ from: vaultPath(folder, entry.file), to: vaultPath(folder, entry.pendingRename) });
+		}
+	}
+	return renames;
+}
+
 /** The slice of Obsidian's vault/file-manager API the performer needs. */
 export interface VaultRenamer {
 	/** Whether anything (file or folder) exists at this vault path. */
@@ -51,8 +71,8 @@ export interface VaultRenamer {
 export interface DeferredRenameOutcome {
 	performed: DeferredRename[];
 	/** Something else already sits at the target path. Left alone on purpose:
-	 * icloud-md keeps the rename pending and will re-report it, so skipping
-	 * here loses nothing. */
+	 * icloud-md keeps the rename pending, status keeps listing it, and the
+	 * sweep retries it on every refresh - so skipping here loses nothing. */
 	blocked: DeferredRename[];
 	/** The source file wasn't where pull said it was (or the rename threw) -
 	 * likely moved or deleted between pull finishing and us getting here.

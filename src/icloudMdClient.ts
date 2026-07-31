@@ -142,15 +142,31 @@ export interface PullSummary {
 	notices: PullNotice[];
 }
 
-export type PlanEntryKind = "create" | "update" | "delete" | "move";
+export type PlanEntryKind = "create" | "createFolder" | "update" | "delete" | "move" | "rename";
 export type PlanResolution = "ready" | "refused" | "conflict" | "noop";
 
+/** One entry of the push plan `status` and `push --dry-run` report, mirroring
+ * icloud-md's `SerializedPlanEntry`. Paths are relative to the sync folder,
+ * POSIX-separated. */
 export interface SerializedPlanEntry {
 	kind: PlanEntryKind;
 	file: string;
 	resolution: PlanResolution;
 	reason?: string;
+	/** kind "createFolder" only: `file` is a directory, and this is the Notes
+	 * folder title it will be given. */
+	folderTitle?: string;
+	/** kind "move" only: the path the note was tracked at before the local move. */
 	previousFile?: string;
+	/** kind "rename" only: where `file` is supposed to end up - a rename some
+	 * earlier `pull --defer-renames` left outstanding. Unlike pull (which is
+	 * incremental and only re-reports a rename when the note changes remotely
+	 * again), status rebuilds this from tracked state every run - which is what
+	 * lets `refreshStatus`'s sweep finish renames deferred outside the plugin.
+	 * See `deferredRenames.ts`. */
+	pendingRename?: string;
+	/** A note about an entry that is otherwise going through fine. */
+	remark?: string;
 }
 
 export interface PushEntryResult extends SerializedPlanEntry {
@@ -165,6 +181,10 @@ export interface PushResult {
 
 export interface StatusResult {
 	entries: SerializedPlanEntry[];
+	/** Tracked notes the plan left untouched. */
+	unchanged: number;
+	/** Plan-level warnings that aren't about one entry. */
+	notices: PullNotice[];
 }
 
 export interface ReauthenticateResult {
