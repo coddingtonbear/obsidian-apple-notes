@@ -25,6 +25,10 @@ export class IcloudSettingTab extends PluginSettingTab {
 				this.plugin.settings.folder = value as string;
 				await this.plugin.saveSettings();
 				return;
+			case "filenameAsTitle":
+				this.plugin.settings.filenameAsTitle = value as boolean;
+				await this.plugin.saveSettings();
+				return;
 			case "autoSyncEnabled":
 				this.plugin.settings.autoSyncEnabled = value as boolean;
 				await this.plugin.saveSettings();
@@ -46,6 +50,15 @@ export class IcloudSettingTab extends PluginSettingTab {
 				name: "Vault folder",
 				desc: "Vault-relative folder to clone into. Choose an empty or new folder - `clone` creates it if missing but refuses one it's already bound to.",
 				control: { type: "text", key: "folder", placeholder: "Apple Notes" },
+			},
+			{
+				name: "Use filename as title",
+				desc:
+					"Names each file after its note's title, the way Obsidian expects - a retitle in Apple Notes then " +
+					"renames the file (with wikilinks rewritten), and renaming a file retitles the note. Off keeps " +
+					"the title as the file's first line instead. A whole-vault choice icloud-md only accepts at " +
+					"clone time, so it can't be changed after connecting.",
+				control: { type: "toggle", key: "filenameAsTitle" },
 			},
 			{
 				name: "Connect",
@@ -87,6 +100,11 @@ export class IcloudSettingTab extends PluginSettingTab {
 				name: "Vault folder",
 				desc: "Connected. Disconnect to change it.",
 				control: { type: "text", key: "folder", disabled: true },
+			},
+			{
+				name: "Use filename as title",
+				desc: "Connected. Disconnect to change it.",
+				control: { type: "toggle", key: "filenameAsTitle", disabled: true },
 			},
 			{
 				name: "Sync now",

@@ -173,8 +173,20 @@ export interface ReauthenticateResult {
 	targetDir: string;
 }
 
-export function cloneIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {
-	return runIcloudMdJson<CloneSummary>(plugin, ["clone", targetDir], options);
+export interface CloneOptions {
+	/** icloud-md only accepts `--filename-as-title` at clone time, which is why
+	 * the corresponding setting locks once connected. */
+	filenameAsTitle: boolean;
+}
+
+export function cloneIcloudMd(
+	plugin: IcloudPlugin,
+	targetDir: string,
+	cloneOptions: CloneOptions,
+	options?: IcloudMdCallOptions,
+) {
+	const args = cloneOptions.filenameAsTitle ? ["clone", "--filename-as-title", targetDir] : ["clone", targetDir];
+	return runIcloudMdJson<CloneSummary>(plugin, args, options);
 }
 
 export function pullIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {

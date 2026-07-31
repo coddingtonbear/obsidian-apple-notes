@@ -135,7 +135,9 @@ export default class IcloudPlugin extends Plugin {
 		this.setSyncState({ kind: "syncing", label: "Connecting" });
 		try {
 			const targetDir = this.getTargetDir();
-			const result = await this.syncQueue.run(() => cloneIcloudMd(this, targetDir, progress.callOptions));
+			const result = await this.syncQueue.run(() =>
+				cloneIcloudMd(this, targetDir, { filenameAsTitle: this.settings.filenameAsTitle }, progress.callOptions),
+			);
 			if (result.ok === false) {
 				return this.reportFailure("connect", result.error.message);
 			}
