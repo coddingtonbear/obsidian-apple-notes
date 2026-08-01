@@ -1,5 +1,7 @@
 # Apple Notes Sync
 
+- **Obsidian Community page:** https://community.obsidian.md/plugins/icloud-notes
+
 Sync a folder in your Obsidian vault with your Apple Notes, in both directions,
 from any operating system — Linux, Windows, or macOS.
 
