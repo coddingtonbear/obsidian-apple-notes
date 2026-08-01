@@ -61,8 +61,8 @@ export class IcloudSettingTab extends PluginSettingTab {
 					name: "icloud-md needs an update",
 					desc:
 						`Version ${this.versionAssessment.version} was found, but this plugin expects ` +
-						`${MINIMUM_ICLOUD_MD_VERSION} or newer. Syncing may still work, but renames from Apple Notes ` +
-						"won't be handled properly. Update with: npm install -g icloud-md",
+						`${MINIMUM_ICLOUD_MD_VERSION} or newer. Syncing may still work, but some notes may not ` +
+						"sync correctly. Update with: npm install -g icloud-md",
 					render: markWarning,
 				};
 			case "unknown":

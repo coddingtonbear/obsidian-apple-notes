@@ -2,9 +2,10 @@ import type { IcloudMdCallResult, VersionInfo } from "./icloudMdClient";
 
 type VersionTriple = [major: number, minor: number, patch: number];
 
-/** Lowest icloud-md release this plugin is written against: 0.5.0 introduced
- * pull's `--defer-renames`, which every pull here passes. */
-const MINIMUM_TRIPLE: VersionTriple = [0, 5, 0];
+/** Lowest icloud-md release this plugin is written against: 0.6.0 retitles
+ * notes via apple-note-title (fixing phantom retitles) and fixes shared-zone
+ * pagination and body lookup. */
+const MINIMUM_TRIPLE: VersionTriple = [0, 6, 0];
 export const MINIMUM_ICLOUD_MD_VERSION = MINIMUM_TRIPLE.join(".");
 
 /** What the settings tab should say about the installed icloud-md, if anything.

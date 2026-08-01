@@ -31,15 +31,15 @@ void test("assessVersion accepts the minimum and anything newer", () => {
 		kind: "ok",
 		version: MINIMUM_ICLOUD_MD_VERSION,
 	});
-	assert.deepEqual(assessVersion(reported("0.5.1")), { kind: "ok", version: "0.5.1" });
-	// Numeric, not lexicographic: 0.10.0 outranks 0.5.0.
+	assert.deepEqual(assessVersion(reported("0.6.1")), { kind: "ok", version: "0.6.1" });
+	// Numeric, not lexicographic: 0.10.0 outranks 0.6.0.
 	assert.deepEqual(assessVersion(reported("0.10.0")), { kind: "ok", version: "0.10.0" });
 	assert.deepEqual(assessVersion(reported("1.0.0")), { kind: "ok", version: "1.0.0" });
 });
 
 void test("assessVersion flags anything below the minimum as outdated", () => {
 	assert.deepEqual(assessVersion(reported("0.4.0")), { kind: "outdated", version: "0.4.0" });
-	assert.deepEqual(assessVersion(reported("0.4.9")), { kind: "outdated", version: "0.4.9" });
+	assert.deepEqual(assessVersion(reported("0.5.1")), { kind: "outdated", version: "0.5.1" });
 });
 
 void test("assessVersion reads an unreadable or missing version as unknown", () => {
