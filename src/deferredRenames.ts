@@ -59,6 +59,21 @@ export function collectStatusRenames(
 	return renames;
 }
 
+/** The status entries minus the renames the sweep just carried out. icloud-md
+ * lists an outstanding rename as a "conflict" (it is, from its side: the file
+ * isn't where the note says it should be), so once the plugin has done the
+ * rename the entry describes something that is no longer true and would read
+ * as a blocked note. Renames the sweep couldn't do stay in: those are stuck
+ * for real. */
+export function withoutPerformedRenames(
+	entries: readonly SerializedPlanEntry[],
+	performed: readonly DeferredRename[],
+	folder: string,
+): SerializedPlanEntry[] {
+	const done = new Set(performed.map((rename) => rename.from));
+	return entries.filter((entry) => !(entry.kind === "rename" && done.has(vaultPath(folder, entry.file))));
+}
+
 /** The slice of Obsidian's vault/file-manager API the performer needs. */
 export interface VaultRenamer {
 	/** Whether anything (file or folder) exists at this vault path. */

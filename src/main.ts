@@ -19,7 +19,9 @@ import {
 	collectDeferredRenames,
 	collectStatusRenames,
 	performDeferredRenames,
+	withoutPerformedRenames,
 	type DeferredRename,
+	type DeferredRenameOutcome,
 	type VaultRenamer,
 } from "./deferredRenames";
 import {
@@ -196,9 +198,9 @@ export default class IcloudPlugin extends Plugin {
 			this.setSyncState({ kind: "error", message: result.error.message });
 			return;
 		}
-		const renamed = await this.performRenames(
-			collectDeferredRenames(result.data.changes, normalizePath(this.settings.folder)),
-		);
+		const renamed = (
+			await this.performRenames(collectDeferredRenames(result.data.changes, normalizePath(this.settings.folder)))
+		).performed.length;
 		const { added, updated, removed } = result.data;
 		if (!options.quiet || added + updated + removed + renamed > 0) {
 			const renameSuffix = renamed > 0 ? `, ${renamed} renamed` : "";
@@ -215,16 +217,16 @@ export default class IcloudPlugin extends Plugin {
 	 * pending in icloud-md's state; pull is incremental and won't mention it
 	 * again until the note changes remotely, but status lists every
 	 * outstanding rename, and `refreshStatus`'s sweep retries them there.
-	 * Returns how many were performed. `quietBlocked` suppresses the
-	 * occupied-target notices: the sweep retries on every refresh, right after
-	 * a pull that already reported those same blocks, and repeating the notice
-	 * each cycle would turn one stuck name into a drumbeat. */
+	 * `quietBlocked` suppresses the occupied-target notices: the sweep retries
+	 * on every refresh, right after a pull that already reported those same
+	 * blocks, and repeating the notice each cycle would turn one stuck name
+	 * into a drumbeat. */
 	private async performRenames(
 		renames: readonly DeferredRename[],
 		options: { quietBlocked?: boolean } = {},
-	): Promise<number> {
+	): Promise<DeferredRenameOutcome> {
 		if (renames.length === 0) {
-			return 0;
+			return { performed: [], blocked: [], failed: [] };
 		}
 		const vault: VaultRenamer = {
 			exists: (path) => this.app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
@@ -247,7 +249,7 @@ export default class IcloudPlugin extends Plugin {
 		for (const failed of outcome.failed) {
 			new Notice(`Apple Notes: renaming "${failed.rename.from}" to "${failed.rename.to}" failed: ${failed.message}`);
 		}
-		return outcome.performed.length;
+		return outcome;
 	}
 
 	async push(options: { quiet?: boolean } = {}): Promise<void> {
@@ -293,13 +295,13 @@ export default class IcloudPlugin extends Plugin {
 		if (!this.requireConnected()) {
 			return;
 		}
-		await this.refreshStatus();
+		// "Show status" is a request for the full picture, so every block gets
+		// its reason here - and the refresh is told not to announce the new
+		// ones itself, or the first request after a refusal would say it twice.
+		await this.refreshStatus({ announceBlocks: false });
 		const state = this.syncState;
 		if (state.kind === "idle") {
 			new Notice(`Apple Notes: ${describeIdle(state)}.`);
-			// The summary names the files; each block's reason is what the user
-			// needs to do anything about it, so they get their own notices even
-			// when they've been announced before - "Show status" is a request.
 			for (const entry of state.blocked) {
 				new Notice(`Apple Notes: ${describeBlock(entry)}`, BLOCKED_NOTICE_MS);
 			}
@@ -318,7 +320,9 @@ export default class IcloudPlugin extends Plugin {
 		await this.push({ quiet: true });
 	}
 
-	private async refreshStatus(): Promise<void> {
+	/** `announceBlocks: false` still records what's blocked (so later refreshes
+	 * stay quiet about it) but leaves telling the user to the caller. */
+	private async refreshStatus(options: { announceBlocks?: boolean } = {}): Promise<void> {
 		const result = await this.syncQueue.run(() => statusIcloudMd(this, this.getTargetDir()));
 		if (result.ok === false) {
 			this.setSyncState({ kind: "error", message: result.error.message });
@@ -332,24 +336,22 @@ export default class IcloudPlugin extends Plugin {
 		// building its plan.
 		const folder = normalizePath(this.settings.folder);
 		const renames = collectStatusRenames(result.data.entries, folder);
-		const performed = await this.performRenames(renames, { quietBlocked: true });
-		if (performed > 0) {
-			new Notice(`Apple Notes: completed ${performed} deferred rename(s) from an earlier sync.`);
+		const { performed } = await this.performRenames(renames, { quietBlocked: true });
+		if (performed.length > 0) {
+			new Notice(`Apple Notes: completed ${performed.length} deferred rename(s) from an earlier sync.`);
 		}
 		// Refused and conflicting entries aren't pending - push will skip them
 		// every time until the user acts - so they're kept apart from the count,
 		// and each is announced once per reason rather than on every refresh.
-		const summary = summarizePlan(result.data.entries, folder);
+		const summary = summarizePlan(withoutPerformedRenames(result.data.entries, performed, folder), folder);
 		const { fresh, announced } = unannouncedBlocks(this.announcedBlocks, summary.blocked);
 		this.announcedBlocks = announced;
-		for (const entry of fresh) {
-			new Notice(`Apple Notes: ${describeBlock(entry)}`, BLOCKED_NOTICE_MS);
+		if (options.announceBlocks !== false) {
+			for (const entry of fresh) {
+				new Notice(`Apple Notes: ${describeBlock(entry)}`, BLOCKED_NOTICE_MS);
+			}
 		}
-		this.setSyncState({
-			kind: "idle",
-			pendingCount: Math.max(0, summary.pendingCount - performed),
-			blocked: summary.blocked,
-		});
+		this.setSyncState({ kind: "idle", pendingCount: summary.pendingCount, blocked: summary.blocked });
 	}
 
 	/** An idle state before any status has been read: nothing known to be queued or stuck. */
