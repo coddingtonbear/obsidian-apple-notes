@@ -354,6 +354,12 @@ export default class IcloudPlugin extends Plugin {
 	 * stay quiet about it) but leaves telling the user to the caller. */
 	private async refreshStatus(options: { announceBlocks?: boolean } = {}): Promise<void> {
 		const result = await this.syncQueue.run(() => statusIcloudMd(this, this.getTargetDir()));
+		if (!this.settings.connected) {
+			// Disconnected while the read was in flight: its answer is about a
+			// folder the plugin no longer syncs, and publishing it would bring
+			// back the status-bar count and every banner.
+			return;
+		}
 		if (result.ok === false) {
 			this.setSyncState({ kind: "error", message: result.error.message });
 			return;
