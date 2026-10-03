@@ -13,8 +13,10 @@ import {
 	pullIcloudMd,
 	pushIcloudMd,
 	reauthenticateIcloudMd,
+	restoreIcloudMd,
 	statusIcloudMd,
 } from "./icloudMdClient";
+import { BlockedBanners } from "./blockedBanner";
 import {
 	collectDeferredRenames,
 	collectStatusRenames,
@@ -30,6 +32,7 @@ import {
 	summarizePlan,
 	unannouncedBlocks,
 	type AnnouncedBlocks,
+	type BlockedEntry,
 	type PlanSummary,
 } from "./blockedEntries";
 
@@ -70,6 +73,7 @@ export default class IcloudPlugin extends Plugin {
 	/** Blocked files the user has already been told about - see `unannouncedBlocks`. */
 	private announcedBlocks: AnnouncedBlocks = new Map();
 	private statusBar: IcloudStatusBar;
+	private blockedBanners: BlockedBanners;
 	periodicSync: PeriodicSync;
 
 	async onload(): Promise<void> {
@@ -79,6 +83,7 @@ export default class IcloudPlugin extends Plugin {
 
 		this.periodicSync = new PeriodicSync(this);
 		this.statusBar = new IcloudStatusBar(this);
+		this.blockedBanners = new BlockedBanners(this);
 		this.addSettingTab(new IcloudSettingTab(this.app, this));
 
 		this.addRibbonIcon("cloud", "Apple Notes sync", (evt) => this.buildActionMenu().showAtMouseEvent(evt));
@@ -270,6 +275,22 @@ export default class IcloudPlugin extends Plugin {
 		await this.refreshStatus();
 	}
 
+	/** The banner's "Discard local edit": rewrites the note from icloud-md's last
+	 * synced copy, then re-reads status so the block clears everywhere at once.
+	 * Obsidian notices the file change on disk and reloads any open editor. */
+	async restoreNote(entry: BlockedEntry): Promise<void> {
+		if (!this.requireConnected()) {
+			return;
+		}
+		const result = await this.syncQueue.run(() => restoreIcloudMd(this, this.getTargetDir(), entry.syncFile));
+		if (result.ok === false) {
+			new Notice(`Apple Notes: discarding the edit to "${entry.file}" failed: ${result.error.message}`);
+			return;
+		}
+		new Notice(`Apple Notes: "${entry.file}" now matches the last synced copy.`);
+		await this.refreshStatus();
+	}
+
 	async reauthenticate(): Promise<void> {
 		if (!this.requireConnected()) {
 			return;
@@ -378,5 +399,6 @@ export default class IcloudPlugin extends Plugin {
 	private setSyncState(state: SyncState): void {
 		this.syncState = state;
 		this.statusBar?.refresh();
+		this.blockedBanners?.refresh();
 	}
 }

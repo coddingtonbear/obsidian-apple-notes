@@ -9,6 +9,9 @@ import type { PlanResolution, SerializedPlanEntry } from "./icloudMdClient";
 export interface BlockedEntry {
 	/** Vault-relative path, so it can be matched against open files. */
 	file: string;
+	/** The same note relative to the sync folder - what icloud-md's own
+	 * commands (`restore`) take. */
+	syncFile: string;
 	resolution: Extract<PlanResolution, "refused" | "conflict">;
 	reason: string;
 }
@@ -36,6 +39,7 @@ export function summarizePlan(entries: readonly SerializedPlanEntry[], folder: s
 		if (isBlocked(entry.resolution)) {
 			summary.blocked.push({
 				file: vaultPath(folder, entry.file),
+				syncFile: entry.file,
 				resolution: entry.resolution,
 				reason: entry.reason ?? `icloud-md reported this change as ${entry.resolution} without saying why`,
 			});

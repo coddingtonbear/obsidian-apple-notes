@@ -22,8 +22,13 @@ void test("summarizePlan counts ready entries and sets refused/conflict ones asi
 	assert.deepEqual(summarizePlan(entries, "Notes"), {
 		pendingCount: 2,
 		blocked: [
-			{ file: "Notes/Japan (Winter 2026).md", resolution: "refused", reason: REFUSAL },
-			{ file: "Notes/Shared.md", resolution: "conflict", reason: "changed in Apple Notes too" },
+			{
+				file: "Notes/Japan (Winter 2026).md",
+				syncFile: "Japan (Winter 2026).md",
+				resolution: "refused",
+				reason: REFUSAL,
+			},
+			{ file: "Notes/Shared.md", syncFile: "Shared.md", resolution: "conflict", reason: "changed in Apple Notes too" },
 		],
 	});
 });
@@ -38,7 +43,12 @@ void test("summarizePlan of nothing is up to date", () => {
 	assert.deepEqual(summarizePlan([], "Notes"), { pendingCount: 0, blocked: [] });
 });
 
-const blocked = (file: string, reason = REFUSAL): BlockedEntry => ({ file, resolution: "refused", reason });
+const blocked = (file: string, reason = REFUSAL): BlockedEntry => ({
+	file,
+	syncFile: file.replace(/^Notes\//, ""),
+	resolution: "refused",
+	reason,
+});
 
 void test("unannouncedBlocks reports every block the first time", () => {
 	const { fresh, announced } = unannouncedBlocks(new Map(), [blocked("Notes/A.md"), blocked("Notes/B.md")]);
@@ -72,7 +82,7 @@ void test("unannouncedBlocks forgets a file once it clears, so a repeat block is
 void test("describeBlock names the file and passes icloud-md's reason through", () => {
 	assert.equal(describeBlock(blocked("Notes/Japan.md")), `"Notes/Japan.md" can't be pushed: ${REFUSAL}`);
 	assert.equal(
-		describeBlock({ file: "Notes/Shared.md", resolution: "conflict", reason: "edited both sides" }),
+		describeBlock({ file: "Notes/Shared.md", syncFile: "Shared.md", resolution: "conflict", reason: "edited both sides" }),
 		'"Notes/Shared.md" conflicts with Apple Notes: edited both sides',
 	);
 });

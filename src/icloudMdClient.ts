@@ -187,6 +187,11 @@ export interface StatusResult {
 	notices: PullNotice[];
 }
 
+export interface RestoreResult {
+	/** The restored note, relative to the sync folder. */
+	file: string;
+}
+
 export interface ReauthenticateResult {
 	appleId: string;
 	dsid: string;
@@ -226,6 +231,14 @@ export function pushIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: 
 
 export function statusIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {
 	return runIcloudMdJson<StatusResult>(plugin, ["status", targetDir], options);
+}
+
+/** `icloud-md restore <file> <dir>`: overwrites a tracked note with its last
+ * synced copy, discarding the local edit. Purely local - no sign-in, no
+ * network. `file` is the sync-folder-relative path status reports, which
+ * icloud-md matches exactly before falling back to a basename search. */
+export function restoreIcloudMd(plugin: IcloudPlugin, targetDir: string, file: string, options?: IcloudMdCallOptions) {
+	return runIcloudMdJson<RestoreResult>(plugin, ["restore", file, targetDir], options);
 }
 
 export function reauthenticateIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {
