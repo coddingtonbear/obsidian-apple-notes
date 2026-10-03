@@ -1,4 +1,5 @@
 import { setIcon } from "obsidian";
+import { describeIdle } from "./blockedEntries";
 import type IcloudPlugin from "./main";
 
 /** Connection + outstanding-change indicator, fed by `icloud-md status --json`. Click opens
@@ -34,14 +35,19 @@ export class IcloudStatusBar {
 				el.ariaLabel = `Apple notes sync: ${state.message}`;
 				break;
 			case "idle":
-				if (state.pendingCount) {
+				// A blocked file outranks queued changes: the queue drains itself,
+				// the block waits for the user. The number beside the icon counts
+				// whichever the icon is about; the tooltip has both.
+				if (state.blocked.length > 0) {
+					setIcon(iconEl, "alert-triangle");
+					textEl.setText(String(state.blocked.length));
+				} else if (state.pendingCount > 0) {
 					setIcon(iconEl, "cloud");
 					textEl.setText(String(state.pendingCount));
-					el.ariaLabel = `Apple notes sync: ${state.pendingCount} change(s) pending`;
 				} else {
 					setIcon(iconEl, "cloud-check");
-					el.ariaLabel = "Apple Notes sync: up to date";
 				}
+				el.ariaLabel = `Apple Notes sync: ${describeIdle(state)}`;
 				break;
 		}
 	}

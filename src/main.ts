@@ -13,15 +13,32 @@ import {
 	pullIcloudMd,
 	pushIcloudMd,
 	reauthenticateIcloudMd,
+	restoreIcloudMd,
 	statusIcloudMd,
 } from "./icloudMdClient";
+import { BlockedBanners } from "./blockedBanner";
 import {
 	collectDeferredRenames,
 	collectStatusRenames,
 	performDeferredRenames,
+	withoutPerformedRenames,
 	type DeferredRename,
+	type DeferredRenameOutcome,
 	type VaultRenamer,
 } from "./deferredRenames";
+import {
+	describeBlock,
+	describeIdle,
+	summarizePlan,
+	unannouncedBlocks,
+	type AnnouncedBlocks,
+	type BlockedEntry,
+	type PlanSummary,
+} from "./blockedEntries";
+
+/** Blocked-file notices carry icloud-md's full reason and the way out, which
+ * takes longer to read than Obsidian's default few seconds. */
+const BLOCKED_NOTICE_MS = 15_000;
 
 // Obsidian's plugin review type-checks without @types/node, so node:path resolves
 // to `any`; pin join() to an explicit signature to keep the call typed.
@@ -43,7 +60,7 @@ function errorMessage(error: unknown): string {
 
 export type SyncState =
 	| { kind: "disconnected" }
-	| { kind: "idle"; pendingCount?: number }
+	| ({ kind: "idle" } & PlanSummary)
 	| { kind: "syncing"; label: string }
 	| { kind: "error"; message: string };
 
@@ -53,16 +70,20 @@ export default class IcloudPlugin extends Plugin {
 	syncState: SyncState = { kind: "disconnected" };
 
 	private readonly syncQueue = new SyncQueue();
+	/** Blocked files the user has already been told about - see `unannouncedBlocks`. */
+	private announcedBlocks: AnnouncedBlocks = new Map();
 	private statusBar: IcloudStatusBar;
+	private blockedBanners: BlockedBanners;
 	periodicSync: PeriodicSync;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.localStorage = new LocalStorageSettings(this);
-		this.syncState = this.settings.connected ? { kind: "idle" } : { kind: "disconnected" };
+		this.syncState = this.settings.connected ? IcloudPlugin.idle() : { kind: "disconnected" };
 
 		this.periodicSync = new PeriodicSync(this);
 		this.statusBar = new IcloudStatusBar(this);
+		this.blockedBanners = new BlockedBanners(this);
 		this.addSettingTab(new IcloudSettingTab(this.app, this));
 
 		this.addRibbonIcon("cloud", "Apple Notes sync", (evt) => this.buildActionMenu().showAtMouseEvent(evt));
@@ -73,6 +94,15 @@ export default class IcloudPlugin extends Plugin {
 		this.addConnectedCommand("show-status", "Show status", () => this.showStatus());
 
 		this.periodicSync.reload();
+		// Nothing is known about what's queued or blocked until status has been
+		// read, and auto-sync's first run is a full interval away - so a note
+		// that was blocked when Obsidian closed would open without its banner.
+		// One read once the workspace is up fills that in.
+		this.app.workspace.onLayoutReady(() => {
+			if (this.settings.connected) {
+				void this.refreshStatus();
+			}
+		});
 	}
 
 	onunload(): void {
@@ -150,7 +180,7 @@ export default class IcloudPlugin extends Plugin {
 			await this.saveSettings();
 			this.periodicSync.reload();
 			new Notice(`Apple Notes: cloned ${result.data.written} note(s) into ${this.settings.folder}.`);
-			this.setSyncState({ kind: "idle" });
+			this.setSyncState(IcloudPlugin.idle());
 			return true;
 		} catch (error) {
 			return this.reportFailure("connect", errorMessage(error));
@@ -165,6 +195,7 @@ export default class IcloudPlugin extends Plugin {
 		this.settings.connected = false;
 		void this.saveSettings();
 		this.periodicSync.reload();
+		this.announcedBlocks = new Map();
 		this.setSyncState({ kind: "disconnected" });
 	}
 
@@ -181,9 +212,9 @@ export default class IcloudPlugin extends Plugin {
 			this.setSyncState({ kind: "error", message: result.error.message });
 			return;
 		}
-		const renamed = await this.performRenames(
-			collectDeferredRenames(result.data.changes, normalizePath(this.settings.folder)),
-		);
+		const renamed = (
+			await this.performRenames(collectDeferredRenames(result.data.changes, normalizePath(this.settings.folder)))
+		).performed.length;
 		const { added, updated, removed } = result.data;
 		if (!options.quiet || added + updated + removed + renamed > 0) {
 			const renameSuffix = renamed > 0 ? `, ${renamed} renamed` : "";
@@ -200,16 +231,16 @@ export default class IcloudPlugin extends Plugin {
 	 * pending in icloud-md's state; pull is incremental and won't mention it
 	 * again until the note changes remotely, but status lists every
 	 * outstanding rename, and `refreshStatus`'s sweep retries them there.
-	 * Returns how many were performed. `quietBlocked` suppresses the
-	 * occupied-target notices: the sweep retries on every refresh, right after
-	 * a pull that already reported those same blocks, and repeating the notice
-	 * each cycle would turn one stuck name into a drumbeat. */
+	 * `quietBlocked` suppresses the occupied-target notices: the sweep retries
+	 * on every refresh, right after a pull that already reported those same
+	 * blocks, and repeating the notice each cycle would turn one stuck name
+	 * into a drumbeat. */
 	private async performRenames(
 		renames: readonly DeferredRename[],
 		options: { quietBlocked?: boolean } = {},
-	): Promise<number> {
+	): Promise<DeferredRenameOutcome> {
 		if (renames.length === 0) {
-			return 0;
+			return { performed: [], blocked: [], failed: [] };
 		}
 		const vault: VaultRenamer = {
 			exists: (path) => this.app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
@@ -232,7 +263,7 @@ export default class IcloudPlugin extends Plugin {
 		for (const failed of outcome.failed) {
 			new Notice(`Apple Notes: renaming "${failed.rename.from}" to "${failed.rename.to}" failed: ${failed.message}`);
 		}
-		return outcome.performed.length;
+		return outcome;
 	}
 
 	async push(options: { quiet?: boolean } = {}): Promise<void> {
@@ -250,6 +281,22 @@ export default class IcloudPlugin extends Plugin {
 		if (!options.quiet || pushed > 0) {
 			new Notice(`Apple Notes push: ${pushed} note(s) pushed.`);
 		}
+		await this.refreshStatus();
+	}
+
+	/** The banner's "Discard local edit": rewrites the note from icloud-md's last
+	 * synced copy, then re-reads status so the block clears everywhere at once.
+	 * Obsidian notices the file change on disk and reloads any open editor. */
+	async restoreNote(entry: BlockedEntry): Promise<void> {
+		if (!this.requireConnected()) {
+			return;
+		}
+		const result = await this.syncQueue.run(() => restoreIcloudMd(this, this.getTargetDir(), entry.syncFile));
+		if (result.ok === false) {
+			new Notice(`Apple Notes: discarding the edit to "${entry.file}" failed: ${result.error.message}`);
+			return;
+		}
+		new Notice(`Apple Notes: "${entry.file}" now matches the last synced copy.`);
 		await this.refreshStatus();
 	}
 
@@ -278,14 +325,16 @@ export default class IcloudPlugin extends Plugin {
 		if (!this.requireConnected()) {
 			return;
 		}
-		await this.refreshStatus();
+		// "Show status" is a request for the full picture, so every block gets
+		// its reason here - and the refresh is told not to announce the new
+		// ones itself, or the first request after a refusal would say it twice.
+		await this.refreshStatus({ announceBlocks: false });
 		const state = this.syncState;
 		if (state.kind === "idle") {
-			new Notice(
-				state.pendingCount
-					? `Apple Notes: ${state.pendingCount} change(s) pending.`
-					: "Apple Notes: up to date.",
-			);
+			new Notice(`Apple Notes: ${describeIdle(state)}.`);
+			for (const entry of state.blocked) {
+				new Notice(`Apple Notes: ${describeBlock(entry)}`, BLOCKED_NOTICE_MS);
+			}
 		} else if (state.kind === "error") {
 			new Notice(`Apple Notes: ${state.message}`);
 		}
@@ -301,8 +350,16 @@ export default class IcloudPlugin extends Plugin {
 		await this.push({ quiet: true });
 	}
 
-	private async refreshStatus(): Promise<void> {
+	/** `announceBlocks: false` still records what's blocked (so later refreshes
+	 * stay quiet about it) but leaves telling the user to the caller. */
+	private async refreshStatus(options: { announceBlocks?: boolean } = {}): Promise<void> {
 		const result = await this.syncQueue.run(() => statusIcloudMd(this, this.getTargetDir()));
+		if (!this.settings.connected) {
+			// Disconnected while the read was in flight: its answer is about a
+			// folder the plugin no longer syncs, and publishing it would bring
+			// back the status-bar count and every banner.
+			return;
+		}
 		if (result.ok === false) {
 			this.setSyncState({ kind: "error", message: result.error.message });
 			return;
@@ -313,12 +370,29 @@ export default class IcloudPlugin extends Plugin {
 		// and get back to a clean slate. Renames this plugin performed moments
 		// ago don't reappear here: status recognises them as completed before
 		// building its plan.
-		const renames = collectStatusRenames(result.data.entries, normalizePath(this.settings.folder));
-		const performed = await this.performRenames(renames, { quietBlocked: true });
-		if (performed > 0) {
-			new Notice(`Apple Notes: completed ${performed} deferred rename(s) from an earlier sync.`);
+		const folder = normalizePath(this.settings.folder);
+		const renames = collectStatusRenames(result.data.entries, folder);
+		const { performed } = await this.performRenames(renames, { quietBlocked: true });
+		if (performed.length > 0) {
+			new Notice(`Apple Notes: completed ${performed.length} deferred rename(s) from an earlier sync.`);
 		}
-		this.setSyncState({ kind: "idle", pendingCount: result.data.entries.length - performed });
+		// Refused and conflicting entries aren't pending - push will skip them
+		// every time until the user acts - so they're kept apart from the count,
+		// and each is announced once per reason rather than on every refresh.
+		const summary = summarizePlan(withoutPerformedRenames(result.data.entries, performed, folder), folder);
+		const { fresh, announced } = unannouncedBlocks(this.announcedBlocks, summary.blocked);
+		this.announcedBlocks = announced;
+		if (options.announceBlocks !== false) {
+			for (const entry of fresh) {
+				new Notice(`Apple Notes: ${describeBlock(entry)}`, BLOCKED_NOTICE_MS);
+			}
+		}
+		this.setSyncState({ kind: "idle", pendingCount: summary.pendingCount, blocked: summary.blocked });
+	}
+
+	/** An idle state before any status has been read: nothing known to be queued or stuck. */
+	private static idle(): SyncState {
+		return { kind: "idle", pendingCount: 0, blocked: [] };
 	}
 
 	/** Surfaces a failed action the same way whether icloud-md reported it or something
@@ -340,5 +414,6 @@ export default class IcloudPlugin extends Plugin {
 	private setSyncState(state: SyncState): void {
 		this.syncState = state;
 		this.statusBar?.refresh();
+		this.blockedBanners?.refresh();
 	}
 }

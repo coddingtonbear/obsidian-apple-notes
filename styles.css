@@ -12,3 +12,40 @@
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
+
+/* Sits between a note's view header and its editor while icloud-md refuses to push it. */
+.icloud-blocked-banner {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-3);
+	padding: var(--size-4-2) var(--size-4-4);
+	background-color: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--text-warning);
+	font-size: var(--font-ui-small);
+}
+
+.icloud-blocked-banner-icon {
+	display: flex;
+	color: var(--text-warning);
+}
+
+.icloud-blocked-banner-text {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.icloud-blocked-banner-headline {
+	font-weight: var(--font-semibold);
+}
+
+.icloud-blocked-banner-reason {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.icloud-blocked-banner-actions {
+	display: flex;
+	gap: var(--size-4-2);
+	flex: 0 0 auto;
+}

@@ -4,6 +4,7 @@ import {
 	collectDeferredRenames,
 	collectStatusRenames,
 	performDeferredRenames,
+	withoutPerformedRenames,
 	type DeferredRename,
 	type VaultRenamer,
 } from "./deferredRenames";
@@ -132,4 +133,14 @@ void test("performDeferredRenames reports a missing source as failed and carries
 	assert.equal(outcome.failed.length, 1);
 	assert.deepEqual(outcome.failed[0].rename, { from: "A/gone.md", to: "A/renamed.md" });
 	assert.match(outcome.failed[0].message, /no longer there/);
+});
+
+void test("withoutPerformedRenames drops only the rename entries the sweep carried out", () => {
+	const entries: SerializedPlanEntry[] = [
+		{ kind: "rename", file: "Old.md", pendingRename: "New.md", resolution: "conflict", reason: "deferred" },
+		{ kind: "rename", file: "Stuck.md", pendingRename: "Taken.md", resolution: "conflict", reason: "deferred" },
+		{ kind: "update", file: "Old.md", resolution: "ready" },
+	];
+	const performed: DeferredRename[] = [{ from: "Apple Notes/Old.md", to: "Apple Notes/New.md" }];
+	assert.deepEqual(withoutPerformedRenames(entries, performed, "Apple Notes"), [entries[1], entries[2]]);
 });
