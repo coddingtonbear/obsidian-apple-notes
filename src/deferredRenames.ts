@@ -22,7 +22,7 @@ export interface DeferredRename {
 
 /** icloud-md reports paths relative to the sync folder, POSIX-separated; a
  * vault path is the same thing with the sync folder prefixed. */
-function vaultPath(folder: string, file: string): string {
+export function vaultPath(folder: string, file: string): string {
 	const trimmed = folder.replace(/\/+$/, "");
 	return trimmed.length === 0 ? file : `${trimmed}/${file}`;
 }
