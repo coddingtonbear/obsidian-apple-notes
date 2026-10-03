@@ -94,6 +94,15 @@ export default class IcloudPlugin extends Plugin {
 		this.addConnectedCommand("show-status", "Show status", () => this.showStatus());
 
 		this.periodicSync.reload();
+		// Nothing is known about what's queued or blocked until status has been
+		// read, and auto-sync's first run is a full interval away - so a note
+		// that was blocked when Obsidian closed would open without its banner.
+		// One read once the workspace is up fills that in.
+		this.app.workspace.onLayoutReady(() => {
+			if (this.settings.connected) {
+				void this.refreshStatus();
+			}
+		});
 	}
 
 	onunload(): void {

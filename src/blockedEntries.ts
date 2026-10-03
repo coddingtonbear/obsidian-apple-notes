@@ -1,5 +1,5 @@
 import { vaultPath } from "./deferredRenames";
-import type { PlanResolution, SerializedPlanEntry } from "./icloudMdClient";
+import type { PlanEntryKind, PlanResolution, SerializedPlanEntry } from "./icloudMdClient";
 
 /** A local change icloud-md will not push until the user does something:
  * "refused" means the markdown has no Apple Notes equivalent, "conflict"
@@ -12,8 +12,18 @@ export interface BlockedEntry {
 	/** The same note relative to the sync folder - what icloud-md's own
 	 * commands (`restore`) take. */
 	syncFile: string;
+	kind: PlanEntryKind;
 	resolution: Extract<PlanResolution, "refused" | "conflict">;
 	reason: string;
+}
+
+/** Whether `icloud-md restore` is the way out: it rewrites a *tracked* note
+ * from its last synced copy, which only answers a blocked edit. A refused
+ * create has no synced copy to go back to, a stuck rename or move is about
+ * where the file is rather than what it says, and a refused delete has no
+ * file to put the banner on. */
+export function canRestore(entry: BlockedEntry): boolean {
+	return entry.kind === "update";
 }
 
 export interface PlanSummary {
@@ -40,6 +50,7 @@ export function summarizePlan(entries: readonly SerializedPlanEntry[], folder: s
 			summary.blocked.push({
 				file: vaultPath(folder, entry.file),
 				syncFile: entry.file,
+				kind: entry.kind,
 				resolution: entry.resolution,
 				reason: entry.reason ?? `icloud-md reported this change as ${entry.resolution} without saying why`,
 			});

@@ -6,7 +6,12 @@ import {
 	type IcloudMdErrorPayload,
 	type IcloudMdProgress,
 } from "./icloudMdProtocol";
+import * as nodePath from "node:path";
 import type IcloudPlugin from "./main";
+
+// See main.ts: node:path is `any` under Obsidian's review type-check, so pin
+// the one call used here.
+const path = nodePath as unknown as { join: (...segments: string[]) => string };
 
 export type { IcloudMdErrorPayload, IcloudMdProgress };
 
@@ -235,10 +240,13 @@ export function statusIcloudMd(plugin: IcloudPlugin, targetDir: string, options?
 
 /** `icloud-md restore <file> <dir>`: overwrites a tracked note with its last
  * synced copy, discarding the local edit. Purely local - no sign-in, no
- * network. `file` is the sync-folder-relative path status reports, which
- * icloud-md matches exactly before falling back to a basename search. */
+ * network. `file` is the sync-folder-relative path status reports. icloud-md
+ * resolves the argument against its own working directory before matching
+ * it exactly, and otherwise falls back to a basename search that fails as
+ * ambiguous when two folders hold a same-named note - so the path is made
+ * absolute here, which matches exactly regardless of where the process runs. */
 export function restoreIcloudMd(plugin: IcloudPlugin, targetDir: string, file: string, options?: IcloudMdCallOptions) {
-	return runIcloudMdJson<RestoreResult>(plugin, ["restore", file, targetDir], options);
+	return runIcloudMdJson<RestoreResult>(plugin, ["restore", path.join(targetDir, file), targetDir], options);
 }
 
 export function reauthenticateIcloudMd(plugin: IcloudPlugin, targetDir: string, options?: IcloudMdCallOptions) {

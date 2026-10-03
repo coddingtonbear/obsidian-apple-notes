@@ -1,6 +1,6 @@
 import { ButtonComponent, MarkdownView, Modal, setIcon } from "obsidian";
 import { bannerFor, dismiss, pruneDismissals, type Dismissals } from "./bannerState";
-import type { BlockedEntry } from "./blockedEntries";
+import { canRestore, type BlockedEntry } from "./blockedEntries";
 import type IcloudPlugin from "./main";
 
 const BANNER_CLASS = "icloud-blocked-banner";
@@ -17,6 +17,12 @@ const BANNER_CLASS = "icloud-blocked-banner";
  * or the view moves to another file. */
 export class BlockedBanners {
 	private dismissed: Dismissals = new Map();
+	/** The blocked set as of the last successful status read. Held through
+	 * "syncing" and "error" states, which say nothing about what's blocked:
+	 * treating them as "nothing blocked" would drop every banner (and every
+	 * dismissal) for the duration of each auto-sync and bring them back
+	 * afterwards. Cleared on disconnect, where it genuinely means nothing. */
+	private blocked: readonly BlockedEntry[] = [];
 
 	constructor(private readonly plugin: IcloudPlugin) {
 		const { workspace } = plugin.app;
@@ -29,14 +35,19 @@ export class BlockedBanners {
 	}
 
 	refresh(): void {
-		const blocked = this.plugin.syncState.kind === "idle" ? this.plugin.syncState.blocked : [];
-		this.dismissed = pruneDismissals(this.dismissed, blocked);
+		const state = this.plugin.syncState;
+		if (state.kind === "idle") {
+			this.blocked = state.blocked;
+		} else if (state.kind === "disconnected") {
+			this.blocked = [];
+		}
+		this.dismissed = pruneDismissals(this.dismissed, this.blocked);
 		for (const leaf of this.plugin.app.workspace.getLeavesOfType("markdown")) {
 			const view = leaf.view;
 			if (!(view instanceof MarkdownView)) {
 				continue;
 			}
-			const entry = view.file === null ? undefined : bannerFor(blocked, this.dismissed, view.file.path);
+			const entry = view.file === null ? undefined : bannerFor(this.blocked, this.dismissed, view.file.path);
 			this.reconcile(view, entry);
 		}
 	}
@@ -71,10 +82,12 @@ export class BlockedBanners {
 		text.createDiv({ cls: "icloud-blocked-banner-reason", text: entry.reason });
 
 		const actions = banner.createDiv({ cls: "icloud-blocked-banner-actions" });
-		new ButtonComponent(actions)
-			.setButtonText("Discard local edit")
-			.setDestructive()
-			.onClick(() => new ConfirmDiscardModal(this.plugin, entry).open());
+		if (canRestore(entry)) {
+			new ButtonComponent(actions)
+				.setButtonText("Discard local edit")
+				.setDestructive()
+				.onClick(() => new ConfirmDiscardModal(this.plugin, entry).open());
+		}
 		new ButtonComponent(actions).setButtonText("Dismiss").onClick(() => {
 			this.dismissed = dismiss(this.dismissed, entry);
 			this.refresh();

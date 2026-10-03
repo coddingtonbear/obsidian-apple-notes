@@ -6,6 +6,7 @@ import type { BlockedEntry } from "./blockedEntries";
 const blocked = (file: string, reason = "no equivalent"): BlockedEntry => ({
 	file: `Notes/${file}`,
 	syncFile: file,
+	kind: "update",
 	resolution: "refused",
 	reason,
 });

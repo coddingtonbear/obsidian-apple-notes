@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeBlock, describeIdle, summarizePlan, unannouncedBlocks, type BlockedEntry } from "./blockedEntries";
+import {
+	canRestore,
+	describeBlock,
+	describeIdle,
+	summarizePlan,
+	unannouncedBlocks,
+	type BlockedEntry,
+} from "./blockedEntries";
 import type { SerializedPlanEntry } from "./icloudMdClient";
 
 const entry = (partial: Partial<SerializedPlanEntry> & Pick<SerializedPlanEntry, "file">): SerializedPlanEntry => ({
@@ -25,10 +32,17 @@ void test("summarizePlan counts ready entries and sets refused/conflict ones asi
 			{
 				file: "Notes/Japan (Winter 2026).md",
 				syncFile: "Japan (Winter 2026).md",
+				kind: "update",
 				resolution: "refused",
 				reason: REFUSAL,
 			},
-			{ file: "Notes/Shared.md", syncFile: "Shared.md", resolution: "conflict", reason: "changed in Apple Notes too" },
+			{
+				file: "Notes/Shared.md",
+				syncFile: "Shared.md",
+				kind: "update",
+				resolution: "conflict",
+				reason: "changed in Apple Notes too",
+			},
 		],
 	});
 });
@@ -46,8 +60,16 @@ void test("summarizePlan of nothing is up to date", () => {
 const blocked = (file: string, reason = REFUSAL): BlockedEntry => ({
 	file,
 	syncFile: file.replace(/^Notes\//, ""),
+	kind: "update",
 	resolution: "refused",
 	reason,
+});
+
+void test("canRestore offers the synced copy only for a blocked edit to a tracked note", () => {
+	assert.equal(canRestore(blocked("Notes/A.md")), true);
+	assert.equal(canRestore({ ...blocked("Notes/New.md"), kind: "create" }), false);
+	assert.equal(canRestore({ ...blocked("Notes/Old.md"), kind: "rename", resolution: "conflict" }), false);
+	assert.equal(canRestore({ ...blocked("Notes/Moved.md"), kind: "move" }), false);
 });
 
 void test("unannouncedBlocks reports every block the first time", () => {
@@ -82,7 +104,7 @@ void test("unannouncedBlocks forgets a file once it clears, so a repeat block is
 void test("describeBlock names the file and passes icloud-md's reason through", () => {
 	assert.equal(describeBlock(blocked("Notes/Japan.md")), `"Notes/Japan.md" can't be pushed: ${REFUSAL}`);
 	assert.equal(
-		describeBlock({ file: "Notes/Shared.md", syncFile: "Shared.md", resolution: "conflict", reason: "edited both sides" }),
+		describeBlock({ ...blocked("Notes/Shared.md", "edited both sides"), resolution: "conflict" }),
 		'"Notes/Shared.md" conflicts with Apple Notes: edited both sides',
 	);
 });
