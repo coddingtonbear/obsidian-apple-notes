@@ -69,6 +69,18 @@ lets you drive that from inside Obsidian — connect a folder, pull, push, and
 5. Once connected, use **Pull** and **Push** from the settings tab, the ribbon
    icon, the status-bar item, or the commands.
 
+### Reconnecting to an existing clone
+
+The folder `icloud-md clone` creates is a complete clone in its own right — the
+plugin only remembers that it's bound to it. If that memory is lost (you
+reinstalled the plugin, or your vault sync didn't carry the plugin's settings
+along) while the folder survived, you don't need to clone again: the settings
+tab recognises a folder that already holds a clone and offers **Use existing
+clone** in place of Connect. With no folder entered, it looks through the vault
+for one and suggests it. Reconnecting adopts the clone's own filename-as-title
+choice, skips the sign-in window (unless the saved iCloud session has expired),
+and pulls to bring the folder up to date.
+
 Sign-ins for the same Apple ID are remembered, so you typically won't need to
 re-authenticate on subsequent syncs.
 
@@ -82,7 +94,7 @@ Once connected, the settings tab offers:
   session goes stale.
 - **Disconnect** — forget the binding and stop auto-sync. This is
   plugin-local only: your synced files and your iCloud-side sign-in are left
-  untouched, so you can reconnect later.
+  untouched, so you can reconnect later with **Use existing clone**.
 - **Sync automatically** — off by default. When enabled, the plugin pulls then
   pushes on a fixed interval, and an **Auto-sync interval** field lets you set
   the number of minutes between runs.
@@ -136,8 +148,8 @@ npm run build
 
 - `npm run dev` — rebuild on change during development.
 - `npm run build` — production bundle (`main.js`).
-- `npm test` — unit tests for the pure logic (CLI protocol parsing and the sync
-  queue), run with `tsx --test`.
+- `npm test` — unit tests for the pure logic (CLI protocol parsing, the sync
+  queue, clone detection), run with `tsx --test`.
 
 To try it in a real vault, symlink or copy `main.js`, `manifest.json`, and
 `styles.css` into `<vault>/.obsidian/plugins/icloud-notes/` and reload

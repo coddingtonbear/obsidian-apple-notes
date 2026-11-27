@@ -18,6 +18,13 @@ import {
 } from "./icloudMdClient";
 import { BlockedBanners } from "./blockedBanner";
 import {
+	ALREADY_CLONED_ERROR,
+	findExistingClone,
+	findExistingClones,
+	type ExistingClone,
+	type VaultProbe,
+} from "./existingClone";
+import {
 	collectDeferredRenames,
 	collectStatusRenames,
 	performDeferredRenames,
@@ -149,6 +156,38 @@ export default class IcloudPlugin extends Plugin {
 		return path.join(this.getVaultBasePath(), normalizePath(this.settings.folder));
 	}
 
+	/** Vault access for clone detection. Goes through the adapter rather than the
+	 * vault index because the marker lives in a dot-folder, which Obsidian never
+	 * indexes. */
+	private vaultProbe(): VaultProbe {
+		const adapter = this.app.vault.adapter;
+		return {
+			readText: async (filePath) => {
+				const normalized = normalizePath(filePath);
+				if (!(await adapter.exists(normalized))) {
+					return undefined;
+				}
+				try {
+					return await adapter.read(normalized);
+				} catch {
+					return undefined;
+				}
+			},
+		};
+	}
+
+	/** The icloud-md clone in `folder`, if there is one. */
+	findExistingClone(folder: string): Promise<ExistingClone | undefined> {
+		return findExistingClone(folder, this.vaultProbe());
+	}
+
+	/** Every icloud-md clone anywhere in the vault - for when the plugin has no
+	 * folder on record and the user shouldn't have to remember where it was. */
+	findExistingClones(): Promise<ExistingClone[]> {
+		const folders = this.app.vault.getAllFolders(false).map((folder) => folder.path);
+		return findExistingClones(folders, this.vaultProbe());
+	}
+
 	buildActionMenu(): Menu {
 		const menu = new Menu();
 		menu.addItem((item) => item.setTitle("Pull now").setIcon("download").onClick(() => void this.pull()));
@@ -174,6 +213,18 @@ export default class IcloudPlugin extends Plugin {
 				cloneIcloudMd(this, targetDir, { filenameAsTitle: this.settings.filenameAsTitle }, progress.callOptions),
 			);
 			if (result.ok === false) {
+				// The settings tab offers "Use existing clone" when it spots one, but
+				// a clone that appeared after the tab rendered (or a marker the probe
+				// couldn't read) still reaches clone - which refuses it. The folder
+				// is exactly what the user wants to sync, so reconnect instead of
+				// telling them to delete it.
+				if (result.error.error === ALREADY_CLONED_ERROR) {
+					const existing = await this.findExistingClone(this.settings.folder);
+					if (existing) {
+						progress.hide();
+						return this.adoptExistingClone(existing);
+					}
+				}
 				return this.reportFailure("connect", result.error.message);
 			}
 			this.settings.connected = true;
@@ -187,6 +238,29 @@ export default class IcloudPlugin extends Plugin {
 		} finally {
 			progress.hide();
 		}
+	}
+
+	/** Reconnects to a folder icloud-md has already cloned - no clone, no
+	 * sign-in window. Adopts the clone's own filename-as-title choice, since
+	 * icloud-md fixed that when the clone was made. Then pulls: the first sync
+	 * is where a stale iCloud session would show itself, and pull reports that
+	 * through the usual notice with Reauthenticate a click away. Returns
+	 * whether the binding was made (it was, unless saving settings threw);
+	 * the pull's outcome is reported separately. */
+	async adoptExistingClone(clone: ExistingClone): Promise<boolean> {
+		try {
+			this.settings.folder = clone.folder;
+			this.settings.filenameAsTitle = clone.filenameAsTitle;
+			this.settings.connected = true;
+			await this.saveSettings();
+		} catch (error) {
+			return this.reportFailure("connect", errorMessage(error));
+		}
+		this.periodicSync.reload();
+		this.setSyncState(IcloudPlugin.idle());
+		new Notice(`Apple Notes: reconnected to the existing clone in ${clone.folder}.`);
+		await this.pull();
+		return true;
 	}
 
 	/** Plugin-local only: forgets the binding and stops auto-sync. Leaves the cloned files
